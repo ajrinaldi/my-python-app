@@ -12,7 +12,7 @@ app.secret_key = "stable_secret_session_key_for_testing"
 OKTA_DOMAIN = os.environ.get("OKTA_DOMAIN")
 CLIENT_ID = os.environ.get("OKTA_CLIENT_ID")
 CLIENT_SECRET = os.environ.get("OKTA_CLIENT_SECRET")
-REDIRECT_URI = "http://localhost:5001/callback" 
+REDIRECT_URI = os.environ.get("REDIRECT_URI", "http://localhost:5001/callback")
 SCOPES = "openid profile email okta.users.manage" 
 # ============================================================
 
