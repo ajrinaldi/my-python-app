@@ -287,12 +287,21 @@ def callback():
 
 @app.route('/logout')
 def logout():
-    session.clear()  # or however you clear your session
+    # 1. Grab your id_token from the session before clearing it (if your OIDC library saves it)
+    id_token = session.get('id_token', '')
     
-    # Dynamically grab the live URL from Render, or use localhost if testing on your laptop
+    # 2. Clear your local session
+    session.clear()  
+    
+    # 3. Get your environment domains
     base_url = os.environ.get("BASE_URL", "http://localhost:5001")
+    okta_domain = os.environ.get("OKTA_DOMAIN")
     
-    return redirect(base_url)
+    # 4. Construct the formal Okta logout endpoint URL
+    okta_logout_url = f"https://{okta_domain}/oauth2/v1/logout?id_token_hint={id_token}&post_logout_redirect_uri={base_url}"
+    
+    # 5. Redirect to Okta (Okta will log you out, see your trusted post_logout_redirect_uri, and send you back to your base_url)
+    return redirect(okta_logout_url)
 
 @app.route('/dashboard')
 def dashboard():
