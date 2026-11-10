@@ -287,11 +287,12 @@ def callback():
 
 @app.route('/logout')
 def logout():
-    id_token = session.get('id_token')
-    session.clear()
-    if id_token and OKTA_DOMAIN:
-        return redirect(f"https://{OKTA_DOMAIN}/oauth2/v1/logout?id_token_hint={id_token}&post_logout_redirect_uri=http://localhost:5001/")
-    return redirect(url_for('home'))
+    session.clear()  # or however you clear your session
+    
+    # Dynamically grab the live URL from Render, or use localhost if testing on your laptop
+    base_url = os.environ.get("BASE_URL", "http://localhost:5001")
+    
+    return redirect(base_url)
 
 @app.route('/dashboard')
 def dashboard():
