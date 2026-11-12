@@ -96,6 +96,7 @@ LOGIN_HTML = """<!DOCTYPE html>
     </div>
 </body>
 </html>"""
+
 FORM_HTML = """<!DOCTYPE html>
 <html>
 <head>
@@ -140,7 +141,7 @@ FORM_HTML = """<!DOCTYPE html>
         <span class="title-text">Okta User Provisioning Dashboard</span> <a href="/logout" class="logout-btn">Log Out</a>
     </h2>
     <div class="container">
-        <form method="POST" action="/create-user" id="provisionForm">
+        <form method="POST" action="/create-user" id="provisionForm" novalidate>
             <div class="section-title">Personal Information</div>
             <div class="form-row">
                 <div class="form-group"><label>First Name:<span class="ast">*</span></label><input type="text" name="first_name" id="first_name" value="{{ f.first_name if f else '' }}"></div>
@@ -168,8 +169,8 @@ FORM_HTML = """<!DOCTYPE html>
                     </select>
                 </div>
                 <div class="form-group" id="employeeNumberGroup">
-                    <label>Employee Number (Required for Employees - 9 Digits):</label>
-                    <input type="text" name="employeeNumber" id="employeeNumber" placeholder="e.g. 123456789" value="{{ f.employeeNumber if f else '' }}">
+                    <label>Employee Number (9 Digits):<span class="ast" id="empNumAst" style="display: none;">*</span></label>
+                    <input type="text" name="employeeNumber" id="employeeNumber" maxlength="9" placeholder="e.g. 123456789" value="{{ f.employeeNumber if f else '' }}">
                 </div>
             </div>
             <div id="contractorFieldsBlock" style="display: none;">
@@ -198,6 +199,7 @@ FORM_HTML = """<!DOCTYPE html>
     const userTypeSelect = document.getElementById('userType');
     const employeeNumInput = document.getElementById('employeeNumber');
     const employeeNumberGroup = document.getElementById('employeeNumberGroup');
+    const empNumAst = document.getElementById('empNumAst');
     const contractorFieldsBlock = document.getElementById('contractorFieldsBlock');
     const startDateInput = document.getElementById('startDate');
     const durationInput = document.getElementById('contractDuration');
@@ -207,13 +209,17 @@ FORM_HTML = """<!DOCTYPE html>
         if (userTypeSelect.value === 'Contractor') {
             employeeNumInput.value = '';
             employeeNumInput.disabled = true;
+            employeeNumInput.required = false;
             employeeNumInput.classList.remove('input-error');
+            empNumAst.style.display = 'none';
             employeeNumberGroup.style.display = 'none';
             contractorFieldsBlock.style.display = 'block';
             startDateInput.disabled = false;
             durationInput.disabled = false;
         } else if (userTypeSelect.value === 'Employee') {
             employeeNumInput.disabled = false;
+            employeeNumInput.required = true;
+            empNumAst.style.display = 'inline';
             employeeNumberGroup.style.display = 'flex';
             contractorFieldsBlock.style.display = 'none';
             startDateInput.value = '';
@@ -224,11 +230,13 @@ FORM_HTML = """<!DOCTYPE html>
             startDateInput.classList.remove('input-error');
             durationInput.classList.remove('input-error');
         } else {
+            employeeNumInput.disabled = false;
+            employeeNumInput.required = false;
+            empNumAst.style.display = 'none';
             employeeNumberGroup.style.display = 'flex';
             contractorFieldsBlock.style.display = 'none';
         }
     }
-
     function calculateContractLifecycleTimeline() {
         const startVal = startDateInput.value;
         const durationVal = durationInput.value.trim();
@@ -281,7 +289,7 @@ FORM_HTML = """<!DOCTYPE html>
         
         if (userTypeSelect.value === 'Employee') {
             const empNumValue = employeeNumInput.value.trim();
-            if (!/^\d{9}$/.test(empNumValue)) {
+            if (!empNumValue || !/^\d{9}$/.test(empNumValue)) {
                 employeeNumInput.classList.add('input-error');
                 missing++;
             } else {
@@ -315,6 +323,8 @@ FORM_HTML = """<!DOCTYPE html>
     </script>
 </body>
 </html>"""
+
+
 @app.route('/')
 def home():
     if 'access_token' in session:
@@ -340,7 +350,6 @@ def callback():
     code = request.args.get('code')
     if not code:
         return "Authentication authorization code missing.", 400
-
     token_url = f"https://{OKTA_DOMAIN}/oauth2/v1/token"
     data = {
         'grant_type': 'authorization_code',
@@ -390,6 +399,16 @@ def create_user():
 
     if not re.match(r"[^@]+@[^@]+\.[^@]+", email):
         return render_template_string(FORM_HTML, f=form_data, msg="Invalid primary email format.", email_error=True)
+
+    # Server-side validation for Employee Number and Contractor fields
+    if raw_user_type == 'Employee' and (not emp_num or not re.match(r"^\d{9}$", emp_num)):
+        return render_template_string(FORM_HTML, f=form_data, msg="Data Validation Error: Employee Number is required and must be a valid 9-digit number for Employees.", email_error=False)
+
+    if raw_user_type == 'Contractor' and emp_num:
+        return render_template_string(FORM_HTML, f=form_data, msg="Data Validation Error: Contractors cannot have an Employee Number.", email_error=False)
+
+    if raw_user_type == 'Contractor' and (not start_date or not duration_str or not re.match(r"^\d+$", duration_str)):
+        return render_template_string(FORM_HTML, f=form_data, msg="Data Validation Error: Contractors require a valid Start Date and numeric Contract Duration.", email_error=False)
 
     user_payload = {
         "profile": {
