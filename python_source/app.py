@@ -65,7 +65,8 @@ def get_okta_api_token():
     }
 
     response = requests.post(token_url, data=data, timeout=15)
-    response.raise_for_status()
+    if response.status_code != 200:
+        raise Exception(f"Okta Token Error ({response.status_code}): {response.text} | ClientID sent: {API_CLIENT_ID}")
     return response.json()["access_token"]
 
 
@@ -350,8 +351,12 @@ def callback():
     }
     response = requests.post(token_url, data=data, timeout=15)
     if response.status_code != 200:
-        raise Exception(f"Okta Token Error ({response.status_code}): {response.text} | ClientID sent: {API_CLIENT_ID}")
-    return response.json()["access_token"]
+        return f"Token exchange failed: {response.text}", 400
+
+    session['access_token'] = response.json().get('access_token')
+    return redirect(url_for('dashboard'))
+
+
 @app.route('/logout')
 def logout():
     session.clear()
@@ -424,10 +429,14 @@ def create_user():
         )
         if okta_response.status_code in (200, 201):
             return render_template_string(FORM_HTML, f=None, msg="User Profile created successfully in Okta!", email_error=False)
-        return render_template_string(FORM_HTML, f=form_data, msg=f"Okta API Error: {okta_response.json().get('errorSummary', 'Unknown error.')}", email_error=False)
+        
+        err_json = okta_response.json()
+        summary = err_json.get('errorSummary', 'Unknown error.')
+        causes = ", ".join([c.get('errorSummary', '') for c in err_json.get('errorCauses', [])])
+        full_err = f"{summary} ({causes})" if causes else summary
+        return render_template_string(FORM_HTML, f=form_data, msg=f"Okta API Error: {full_err}", email_error=False)
     except Exception as e:
         return render_template_string(FORM_HTML, f=form_data, msg=f"Failed to communicate with Okta: {str(e)}", email_error=False)
-
 if __name__ == '__main__':
     port = int(os.environ.get("PORT", 5001))
     app.run(host="0.0.0.0", port=port, debug=True)
