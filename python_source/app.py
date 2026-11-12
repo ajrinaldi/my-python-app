@@ -1,20 +1,73 @@
+import json
 import os
 import re
+import time
+import uuid
+import jwt
 import requests
 from flask import Flask, redirect, request, url_for, session, render_template_string
 from dotenv import load_dotenv
 
 load_dotenv()
 app = Flask(__name__)
-app.secret_key = "stable_secret_session_key_for_testing"
+app.secret_key = os.environ.get("FLASK_SECRET_KEY", "stable_secret_session_key_for_testing")
 
-# ==================== OIDC CONFIGURATION ====================
-OKTA_DOMAIN = os.environ.get("OKTA_DOMAIN")
+# ==================== OKTA CONFIGURATION ====================
+raw_domain = os.environ.get("OKTA_DOMAIN", "").strip()
+OKTA_DOMAIN = raw_domain.replace("https://", "").replace("http://", "").rstrip("/")
+
+# 1. OIDC Web App (for human user login/callback)
 CLIENT_ID = os.environ.get("OKTA_CLIENT_ID")
 CLIENT_SECRET = os.environ.get("OKTA_CLIENT_SECRET")
 REDIRECT_URI = os.environ.get("REDIRECT_URI", "http://localhost:5001/callback")
-SCOPES = "openid profile email okta.users.manage" 
+SCOPES = "openid profile email"
+
+# 2. API Services App (for creating users via Private JWK)
+API_CLIENT_ID = os.environ.get("OKTA_API_CLIENT_ID")
+
+SECRET_PATH = "/etc/secrets/okta_private_jwk.json"
+jwk_file = SECRET_PATH if os.path.exists(SECRET_PATH) else "okta_private_jwk.json"
+
+with open(jwk_file, "r") as f:
+    JWK_DICT = json.load(f)
+
+SIGNING_KEY = jwt.algorithms.RSAAlgorithm.from_jwk(json.dumps(JWK_DICT))
+KEY_ID = JWK_DICT["kid"]
 # ============================================================
+
+
+def get_okta_api_token():
+    """Signs a short-lived JWT with the private JWK and exchanges it for an Okta API access token."""
+    token_url = f"https://{OKTA_DOMAIN}/oauth2/v1/token"
+    now = int(time.time())
+
+    payload = {
+        "aud": token_url,
+        "iss": API_CLIENT_ID,
+        "sub": API_CLIENT_ID,
+        "iat": now,
+        "exp": now + 300,
+        "jti": str(uuid.uuid4())
+    }
+
+    client_assertion = jwt.encode(
+        payload,
+        SIGNING_KEY,
+        algorithm="RS256",
+        headers={"kid": KEY_ID}
+    )
+
+    data = {
+        "grant_type": "client_credentials",
+        "scope": "okta.users.manage",
+        "client_assertion_type": "urn:ietf:params:oauth:client-assertion-type:jwt-bearer",
+        "client_assertion": client_assertion
+    }
+
+    response = requests.post(token_url, data=data, timeout=15)
+    response.raise_for_status()
+    return response.json()["access_token"]
+
 
 LOGIN_HTML = """<!DOCTYPE html>
 <html>
@@ -263,93 +316,122 @@ FORM_HTML = """<!DOCTYPE html>
 </html>"""
 @app.route('/')
 def home():
-    if 'access_token' in session: return redirect(url_for('dashboard'))
+    if 'access_token' in session:
+        return redirect(url_for('dashboard'))
     return render_template_string(LOGIN_HTML)
+
 
 @app.route('/login')
 def login():
-    okta_auth_url = f"https://{OKTA_DOMAIN}/oauth2/v1/authorize?client_id={CLIENT_ID}&response_type=code&scope={SCOPES.replace(' ', '%20')}&redirect_uri={REDIRECT_URI}&state=application_security_test_state"
+    okta_auth_url = (
+        f"https://{OKTA_DOMAIN}/oauth2/v1/authorize"
+        f"?client_id={CLIENT_ID}"
+        f"&response_type=code"
+        f"&scope={SCOPES.replace(' ', '%20')}"
+        f"&redirect_uri={REDIRECT_URI}"
+        f"&state=application_security_test_state"
+    )
     return redirect(okta_auth_url)
+
 
 @app.route('/callback')
 def callback():
     code = request.args.get('code')
-    if not code: return "Authentication authorization code missing.", 400
+    if not code:
+        return "Authentication authorization code missing.", 400
+
     token_url = f"https://{OKTA_DOMAIN}/oauth2/v1/token"
-    data = {'grant_type': 'authorization_code', 'client_id': CLIENT_ID, 'client_secret': CLIENT_SECRET, 'code': code, 'redirect_uri': REDIRECT_URI}
-    res = requests.post(token_url, data=data)
-    if res.status_code == 200:
-        res_data = res.json()
-        session['access_token'] = res_data.get('access_token')
-        session['id_token'] = res_data.get('id_token')
-        return redirect(url_for('dashboard'))
-    return f"Token exchange flow error: {res.text}", 400
+    data = {
+        'grant_type': 'authorization_code',
+        'client_id': CLIENT_ID,
+        'client_secret': CLIENT_SECRET,
+        'code': code,
+        'redirect_uri': REDIRECT_URI
+    }
+    response = requests.post(token_url, data=data, timeout=15)
+    if response.status_code != 200:
+        return f"Token exchange failed: {response.text}", 400
+
+    session['access_token'] = response.json().get('access_token')
+    return redirect(url_for('dashboard'))
+
 
 @app.route('/logout')
 def logout():
-    # 1. Grab your id_token from the session before clearing it (if your OIDC library saves it)
-    id_token = session.get('id_token', '')
-    
-    # 2. Clear your local session
-    session.clear()  
-    
-    # 3. Get your environment domains
-    base_url = os.environ.get("BASE_URL", "http://localhost:5001")
-    okta_domain = os.environ.get("OKTA_DOMAIN")
-    
-    # 4. Construct the formal Okta logout endpoint URL
-    okta_logout_url = f"https://{okta_domain}/oauth2/v1/logout?id_token_hint={id_token}&post_logout_redirect_uri={base_url}"
-    
-    # 5. Redirect to Okta (Okta will log you out, see your trusted post_logout_redirect_uri, and send you back to your base_url)
-    return redirect(okta_logout_url)
+    session.clear()
+    return redirect(url_for('home'))
+
 
 @app.route('/dashboard')
 def dashboard():
-    if 'access_token' not in session: return redirect(url_for('home'))
+    if 'access_token' not in session:
+        return redirect(url_for('home'))
     return render_template_string(FORM_HTML, f=None, msg=None, email_error=False)
+
 
 @app.route('/create-user', methods=['POST'])
 def create_user():
-    if 'access_token' not in session: return redirect(url_for('home'))
-    raw_user_type = request.form.get('userType', '')
-    normalized_user_type = raw_user_type.lower() if raw_user_type in ['Contractor', 'Employee'] else ''
-    emp_num = request.form.get('employeeNumber', '').strip()
-    start_date = request.form.get('startDate', '').strip()
-    duration_str = request.form.get('contractDuration', '').strip()
-    end_date = request.form.get('endDate', '').strip()
+    if 'access_token' not in session:
+        return redirect(url_for('home'))
 
-    form_data = {'first_name': request.form.get('first_name', ''), 'last_name': request.form.get('last_name', ''), 'email': request.form.get('email', '').strip(), 'second_email': request.form.get('second_email', ''), 'title': request.form.get('title', ''), 'department': request.form.get('department', ''), 'userType': raw_user_type, 'employeeNumber': emp_num, 'startDate': start_date, 'contractDuration': duration_str, 'endDate': end_date}
-    primary_email = form_data['email']
+    form_data = request.form.to_dict()
+    first_name = form_data.get('first_name', '').strip()
+    last_name = form_data.get('last_name', '').strip()
+    email = form_data.get('email', '').strip()
+    second_email = form_data.get('second_email', '').strip()
+    title = form_data.get('title', '').strip()
+    department = form_data.get('department', '').strip()
+    raw_user_type = form_data.get('userType', '').strip()
+    emp_num = form_data.get('employeeNumber', '').strip()
+    start_date = form_data.get('startDate', '').strip()
+    duration_str = form_data.get('contractDuration', '').strip()
+    end_date = form_data.get('endDate', '').strip()
 
-    if raw_user_type == 'Contractor' and emp_num:
-        return render_template_string(FORM_HTML, f=form_data, msg="Data Validation Error: Contractors cannot possess an Employee Number.", email_error=False)
-    if raw_user_type == 'Employee' and (not emp_num or not re.match(r"^\d{9}$", emp_num)):
-        return render_template_string(FORM_HTML, f=form_data, msg="Data Validation Error: Employees must possess a valid 9-digit Employee Number.", email_error=False)
-    if raw_user_type == 'Contractor' and (not start_date or not duration_str or not re.match(r"^\d+$", duration_str)):
-        return render_template_string(FORM_HTML, f=form_data, msg="Data Validation Error: Contractors must possess a valid Start Date and Numeric Duration.", email_error=False)
+    if not re.match(r"[^@]+@[^@]+\.[^@]+", email):
+        return render_template_string(FORM_HTML, f=form_data, msg="Invalid primary email format.", email_error=True)
 
-    headers = {"Authorization": f"Bearer {session.get('access_token')}", "Accept": "application/json", "Content-Type": "application/json"}
-    try:
-        response = requests.get(f"https://{OKTA_DOMAIN}/api/v1/users?q={primary_email}", headers=headers)
-        if response.status_code == 200 and any(u.get('profile', {}).get('login', '').lower() == primary_email.lower() for u in response.json()):
-            return render_template_string(FORM_HTML, f=form_data, msg="Primary Email is already in use.", email_error=True)
-    except Exception as e: print(f"Okta check failed: {e}")
-    user_payload = {"profile": {"firstName": form_data['first_name'], "lastName": form_data['last_name'], "email": form_data['email'], "login": form_data['email'], "title": form_data['title'], "department": form_data['department'], "userType": normalized_user_type}}
-    if form_data['second_email'].strip(): user_payload["profile"]["secondEmail"] = form_data['second_email']
-    if emp_num and raw_user_type == 'Employee': user_payload["profile"]["employeeNumber"] = emp_num
+    user_payload = {
+        "profile": {
+            "firstName": first_name,
+            "lastName": last_name,
+            "email": email,
+            "login": email,
+            "title": title,
+            "department": department,
+            "userType": raw_user_type
+        }
+    }
+
+    if second_email:
+        user_payload["profile"]["secondEmail"] = second_email
+
+    if raw_user_type == 'Employee':
+        user_payload["profile"]["employeeNumber"] = emp_num
+
     if raw_user_type == 'Contractor':
         user_payload["profile"]["contractStartDate"] = start_date
         user_payload["profile"]["contractDurationMonths"] = int(duration_str)
         user_payload["profile"]["contractEndDate"] = end_date
 
     try:
-        okta_response = requests.post(f"https://{OKTA_DOMAIN}/api/v1/users?activate=false", json=user_payload, headers=headers)
-        if okta_response.status_code == 200 or okta_response.status_code == 201:
+        api_token = get_okta_api_token()
+        headers = {
+            "Authorization": f"Bearer {api_token}",
+            "Accept": "application/json",
+            "Content-Type": "application/json"
+        }
+        okta_response = requests.post(
+            f"https://{OKTA_DOMAIN}/api/v1/users?activate=false",
+            json=user_payload,
+            headers=headers,
+            timeout=15
+        )
+        if okta_response.status_code in (200, 201):
             return render_template_string(FORM_HTML, f=None, msg="User Profile created successfully in Okta!", email_error=False)
         return render_template_string(FORM_HTML, f=form_data, msg=f"Okta API Error: {okta_response.json().get('errorSummary', 'Unknown error.')}", email_error=False)
-    except Exception as e: 
+    except Exception as e:
         return render_template_string(FORM_HTML, f=form_data, msg=f"Failed to communicate with Okta: {str(e)}", email_error=False)
 
 if __name__ == '__main__':
-    app.run(port=5001, debug=True)
-
+    port = int(os.environ.get("PORT", 5001))
+    app.run(host="0.0.0.0", port=port, debug=True)
