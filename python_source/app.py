@@ -350,12 +350,8 @@ def callback():
     }
     response = requests.post(token_url, data=data, timeout=15)
     if response.status_code != 200:
-        return f"Token exchange failed: {response.text}", 400
-
-    session['access_token'] = response.json().get('access_token')
-    return redirect(url_for('dashboard'))
-
-
+        raise Exception(f"Okta Token Error ({response.status_code}): {response.text} | ClientID sent: {API_CLIENT_ID}")
+    return response.json()["access_token"]
 @app.route('/logout')
 def logout():
     session.clear()
