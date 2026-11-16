@@ -125,8 +125,10 @@ FORM_HTML = """<!DOCTYPE html>
         input:focus, select:focus { border-color: #002855; outline: none; }
         input.input-error, select.input-error { border: 2px solid #d32f2f !important; background-color: #fff5f5; }
         input:disabled { background-color: #e2e8f0; cursor: not-allowed; }
-        .radio-group { display: flex; gap: 20px; align-items: center; margin-top: 4px; }
-        .radio-label { display: flex; align-items: center; gap: 6px; font-weight: normal; font-size: 13px; color: #2d3748; cursor: pointer; margin-bottom: 0; }
+        .inline-radio-row { display: flex; align-items: center; gap: 18px; margin-top: 4px; }
+        .inline-radio-row > label:first-child { margin-bottom: 0; }
+        .radio-group { display: flex; gap: 16px; align-items: center; }
+        .radio-label { display: flex; align-items: center; gap: 5px; font-weight: normal; font-size: 13px; color: #2d3748; cursor: pointer; margin-bottom: 0; }
         .radio-label input[type="radio"] { accent-color: #002855; cursor: pointer; margin: 0; }
         .btn-container { padding-top: 5px; }
         .btn { width: 100%; background: #002855; color: white; padding: 10px; border: none; border-radius: 6px; font-size: 15px; font-weight: bold; cursor: pointer; border-bottom: 4px solid #00152e; transition: all 0.1s ease; box-shadow: 0 3px 5px rgba(0,0,0,0.15); display: block; text-align: center; box-sizing: border-box; }
@@ -174,6 +176,7 @@ FORM_HTML = """<!DOCTYPE html>
                         <option value="Employee" {% if f and f.userType == 'Employee' %}selected{% endif %}>Employee</option>
                     </select>
                 </div>
+                <div class="form-group"><label>Start Date:<span class="ast">*</span></label><input type="date" name="startDate" id="startDate" value="{{ f.startDate if f else '' }}"></div>
                 <div class="form-group" id="employeeNumberGroup">
                     <label>Employee Number (9 Digits):<span class="ast" id="empNumAst" style="display: none;">*</span></label>
                     <input type="text" name="employeeNumber" id="employeeNumber" maxlength="9" placeholder="e.g. 123456789" value="{{ f.employeeNumber if f else '' }}">
@@ -183,7 +186,6 @@ FORM_HTML = """<!DOCTYPE html>
                 <hr>
                 <div class="section-title">Contractor Term Lifecycle Metadata</div>
                 <div class="form-row">
-                    <div class="form-group"><label>Start Date:<span class="ast">*</span></label><input type="date" name="startDate" id="startDate" value="{{ f.startDate if f else '' }}"></div>
                     <div class="form-group"><label>Contract Duration (Months Only):<span class="ast">*</span></label><input type="text" name="contractDuration" id="contractDuration" placeholder="e.g. 6" value="{{ f.contractDuration if f else '' }}"></div>
                     <div class="form-group"><label>End Date (Auto-Calculated):</label><input type="date" name="endDate" id="endDate" value="{{ f.endDate if f else '' }}" readonly style="background-color: #e2e8f0; cursor: not-allowed;"></div>
                 </div>
@@ -191,7 +193,7 @@ FORM_HTML = """<!DOCTYPE html>
             <hr>
             <div class="section-title">Account Activation</div>
             <div class="form-row">
-                <div class="form-group">
+                <div class="inline-radio-row">
                     <label>Activate Now:<span class="ast">*</span></label>
                     <div class="radio-group">
                         <label class="radio-label">
@@ -236,21 +238,18 @@ FORM_HTML = """<!DOCTYPE html>
             employeeNumInput.classList.remove('input-error');
             empNumAst.style.display = 'none';
             employeeNumberGroup.style.display = 'none';  // Hide employee number field
-            contractorFieldsBlock.style.display = 'block';  // Show contractor date/duration fields
-            startDateInput.disabled = false;
+            contractorFieldsBlock.style.display = 'block';  // Show contractor duration/end date fields
             durationInput.disabled = false;
+            calculateContractLifecycleTimeline();  // Recalculate end date if start date is already set
         } else if (userTypeSelect.value === 'Employee') {
             employeeNumInput.disabled = false;
             employeeNumInput.required = true;  // Enforce employee number for Employees
             empNumAst.style.display = 'inline';  // Show red required asterisk
             employeeNumberGroup.style.display = 'flex';
             contractorFieldsBlock.style.display = 'none';  // Hide contractor block
-            startDateInput.value = '';
             durationInput.value = '';
             endDateInput.value = '';
-            startDateInput.disabled = true;
             durationInput.disabled = true;
-            startDateInput.classList.remove('input-error');
             durationInput.classList.remove('input-error');
         } else {
             // Default state before a user type is selected
@@ -304,10 +303,10 @@ FORM_HTML = """<!DOCTYPE html>
 
     // Client-side form validation before submitting to Flask
     document.getElementById('provisionForm').addEventListener('submit', function(e) {
-        let fields = [{id:'first_name'},{id:'last_name'},{id:'email'},{id:'title'},{id:'department'},{id:'userType'}];
+        let fields = [{id:'first_name'},{id:'last_name'},{id:'email'},{id:'title'},{id:'department'},{id:'userType'},{id:'startDate'}];
         let missing = 0;
         
-        // Check all standard required fields
+        // Check all standard required fields (including Start Date for both Employees & Contractors)
         fields.forEach(f => {
             let el = document.getElementById(f.id);
             if(!el.value.trim()){
@@ -329,17 +328,11 @@ FORM_HTML = """<!DOCTYPE html>
             }
         }
 
-        // Validate Contractor dates/duration and ensure no Employee Number exists
+        // Validate Contractor duration and ensure no Employee Number exists
         if (userTypeSelect.value === 'Contractor') {
             if (employeeNumInput.value.trim() !== '') {
                 employeeNumInput.classList.add('input-error');
                 missing++;
-            }
-            if (!startDateInput.value) {
-                startDateInput.classList.add('input-error');
-                missing++;
-            } else {
-                startDateInput.classList.remove('input-error');
             }
             if (!durationInput.value.trim() || !/^\d+$/.test(durationInput.value.trim())) {
                 durationInput.classList.add('input-error');
@@ -425,13 +418,16 @@ def create_user():
     department = form_data.get('department', '').strip()  # Extract and trim Department
     raw_user_type = form_data.get('userType', '').strip()  # Extract User Type ('Employee' or 'Contractor')
     emp_num = form_data.get('employeeNumber', '').strip()  # Extract 9-digit Employee Number
-    start_date = form_data.get('startDate', '').strip()  # Extract Contractor Start Date
+    start_date = form_data.get('startDate', '').strip()  # Extract Start Date (required for both Employees & Contractors)
     duration_str = form_data.get('contractDuration', '').strip()  # Extract Contractor Duration in months
     end_date = form_data.get('endDate', '').strip()  # Extract auto-calculated Contractor End Date
     activate_now = form_data.get('activateNow', 'no').strip().lower() == 'yes'  # Determine whether to activate user immediately
 
     if not re.match(r"[^@]+@[^@]+\.[^@]+", email):  # Validate basic email syntax on the server
         return render_template_string(FORM_HTML, f=form_data, msg="Invalid primary email format.", email_error=True)
+
+    if not start_date:  # Enforce Start Date for both Employees and Contractors
+        return render_template_string(FORM_HTML, f=form_data, msg="Data Validation Error: Start Date is required for all users.", email_error=False)
 
     # Server-side validation for Employee Number and Contractor fields
     if raw_user_type == 'Employee' and (not emp_num or not re.match(r"^\d{9}$", emp_num)):  # Enforce 9-digit number for Employees
@@ -440,8 +436,8 @@ def create_user():
     if raw_user_type == 'Contractor' and emp_num:  # Block Contractors from having an Employee Number
         return render_template_string(FORM_HTML, f=form_data, msg="Data Validation Error: Contractors cannot have an Employee Number.", email_error=False)
 
-    if raw_user_type == 'Contractor' and (not start_date or not duration_str or not re.match(r"^\d+$", duration_str)):  # Enforce Contractor date & numeric duration
-        return render_template_string(FORM_HTML, f=form_data, msg="Data Validation Error: Contractors require a valid Start Date and numeric Contract Duration.", email_error=False)
+    if raw_user_type == 'Contractor' and (not duration_str or not re.match(r"^\d+$", duration_str)):  # Enforce Contractor numeric duration
+        return render_template_string(FORM_HTML, f=form_data, msg="Data Validation Error: Contractors require a valid numeric Contract Duration.", email_error=False)
 
     user_payload = {  # Construct the base JSON payload expected by Okta's /api/v1/users endpoint
         "profile": {
@@ -451,7 +447,8 @@ def create_user():
             "login": email,  # Set Okta username/login equal to their primary email
             "title": title,
             "department": department,
-            "userType": raw_user_type
+            "userType": raw_user_type,
+            "startDate": start_date  # Send Start Date for both Employees and Contractors
         }
     }
 
@@ -491,6 +488,8 @@ def create_user():
         return render_template_string(FORM_HTML, f=form_data, msg=f"Okta API Error: {full_err}", email_error=False)  # Re-render form with error modal
     except Exception as e:  # Catch network timeouts, token errors, or unexpected exceptions
         return render_template_string(FORM_HTML, f=form_data, msg=f"Failed to communicate with Okta: {str(e)}", email_error=False)
+
+
 if __name__ == '__main__':  # Standard Python entry point check
     port = int(os.environ.get("PORT", 5001))  # Read PORT from environment (for Render/cloud hosting) or default to 5001
     app.run(host="0.0.0.0", port=port, debug=True)  # Start the Flask web server listening on all network interfaces
