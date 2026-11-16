@@ -121,10 +121,13 @@ FORM_HTML = """<!DOCTYPE html>
         .form-group { flex: 1; display: flex; flex-direction: column; }
         label { font-weight: bold; margin-bottom: 3px; font-size: 12px; color: #4a5568; }
         .ast { color: #d32f2f; font-weight: bold; }
-        input, select { padding: 8px; border: 1px solid #cbd5e1; border-radius: 4px; box-sizing: border-box; font-size: 13px; transition: all 0.2s; }
+        input[type="text"], input[type="date"], select { padding: 8px; border: 1px solid #cbd5e1; border-radius: 4px; box-sizing: border-box; font-size: 13px; transition: all 0.2s; }
         input:focus, select:focus { border-color: #002855; outline: none; }
         input.input-error, select.input-error { border: 2px solid #d32f2f !important; background-color: #fff5f5; }
         input:disabled { background-color: #e2e8f0; cursor: not-allowed; }
+        .radio-group { display: flex; gap: 20px; align-items: center; margin-top: 4px; }
+        .radio-label { display: flex; align-items: center; gap: 6px; font-weight: normal; font-size: 13px; color: #2d3748; cursor: pointer; margin-bottom: 0; }
+        .radio-label input[type="radio"] { accent-color: #002855; cursor: pointer; margin: 0; }
         .btn-container { padding-top: 5px; }
         .btn { width: 100%; background: #002855; color: white; padding: 10px; border: none; border-radius: 6px; font-size: 15px; font-weight: bold; cursor: pointer; border-bottom: 4px solid #00152e; transition: all 0.1s ease; box-shadow: 0 3px 5px rgba(0,0,0,0.15); display: block; text-align: center; box-sizing: border-box; }
         .btn:hover { background: #001f42; transform: translateY(2px); border-bottom-width: 2px; box-shadow: 0 2px 3px rgba(0,0,0,0.15); }
@@ -183,6 +186,21 @@ FORM_HTML = """<!DOCTYPE html>
                     <div class="form-group"><label>Start Date:<span class="ast">*</span></label><input type="date" name="startDate" id="startDate" value="{{ f.startDate if f else '' }}"></div>
                     <div class="form-group"><label>Contract Duration (Months Only):<span class="ast">*</span></label><input type="text" name="contractDuration" id="contractDuration" placeholder="e.g. 6" value="{{ f.contractDuration if f else '' }}"></div>
                     <div class="form-group"><label>End Date (Auto-Calculated):</label><input type="date" name="endDate" id="endDate" value="{{ f.endDate if f else '' }}" readonly style="background-color: #e2e8f0; cursor: not-allowed;"></div>
+                </div>
+            </div>
+            <hr>
+            <div class="section-title">Account Activation</div>
+            <div class="form-row">
+                <div class="form-group">
+                    <label>Activate Now:<span class="ast">*</span></label>
+                    <div class="radio-group">
+                        <label class="radio-label">
+                            <input type="radio" name="activateNow" value="yes" {% if f and f.activateNow == 'yes' %}checked{% endif %}> Yes
+                        </label>
+                        <label class="radio-label">
+                            <input type="radio" name="activateNow" value="no" {% if not f or f.activateNow != 'yes' %}checked{% endif %}> No
+                        </label>
+                    </div>
                 </div>
             </div>
             <p style="font-size:11px; color:#666; font-style:italic; margin-top:8px; margin-bottom:8px;">Fields marked with a red asterisk (<span class="ast">*</span>) are required.</p>
@@ -339,8 +357,6 @@ FORM_HTML = """<!DOCTYPE html>
     </script>
 </body>
 </html>"""
-
-
 @app.route('/')  # Root URL route
 def home():
     if 'access_token' in session:  # If the admin is already logged in
@@ -380,6 +396,8 @@ def callback():
 
     session['access_token'] = response.json().get('access_token')  # Save the user's access token in the encrypted Flask session
     return redirect(url_for('dashboard'))  # Send the authenticated user to the dashboard
+
+
 @app.route('/logout')  # Route to log out of the local application
 def logout():
     session.clear()  # Wipe all stored session data (including access_token)
@@ -410,6 +428,7 @@ def create_user():
     start_date = form_data.get('startDate', '').strip()  # Extract Contractor Start Date
     duration_str = form_data.get('contractDuration', '').strip()  # Extract Contractor Duration in months
     end_date = form_data.get('endDate', '').strip()  # Extract auto-calculated Contractor End Date
+    activate_now = form_data.get('activateNow', 'no').strip().lower() == 'yes'  # Determine whether to activate user immediately
 
     if not re.match(r"[^@]+@[^@]+\.[^@]+", email):  # Validate basic email syntax on the server
         return render_template_string(FORM_HTML, f=form_data, msg="Invalid primary email format.", email_error=True)
@@ -454,14 +473,16 @@ def create_user():
             "Accept": "application/json",
             "Content-Type": "application/json"
         }
-        okta_response = requests.post(  # Call Okta's Create User API in STAGED mode (activate=false)
-            f"https://{OKTA_DOMAIN}/api/v1/users?activate=false",
+        activate_param = "true" if activate_now else "false"  # Set Okta API activate query parameter
+        okta_response = requests.post(  # Call Okta's Create User API
+            f"https://{OKTA_DOMAIN}/api/v1/users?activate={activate_param}",
             json=user_payload,
             headers=headers,
             timeout=15
         )
         if okta_response.status_code in (200, 201):  # Check if Okta successfully created the user profile
-            return render_template_string(FORM_HTML, f=None, msg="User Profile created successfully in Okta!", email_error=False)
+            status_text = "activated" if activate_now else "created in staged mode"
+            return render_template_string(FORM_HTML, f=None, msg=f"User Profile {status_text} successfully in Okta!", email_error=False)
         
         err_json = okta_response.json()  # Parse Okta's error response JSON if creation failed
         summary = err_json.get('errorSummary', 'Unknown error.')  # Get top-level error summary
@@ -470,7 +491,6 @@ def create_user():
         return render_template_string(FORM_HTML, f=form_data, msg=f"Okta API Error: {full_err}", email_error=False)  # Re-render form with error modal
     except Exception as e:  # Catch network timeouts, token errors, or unexpected exceptions
         return render_template_string(FORM_HTML, f=form_data, msg=f"Failed to communicate with Okta: {str(e)}", email_error=False)
-
 if __name__ == '__main__':  # Standard Python entry point check
     port = int(os.environ.get("PORT", 5001))  # Read PORT from environment (for Render/cloud hosting) or default to 5001
     app.run(host="0.0.0.0", port=port, debug=True)  # Start the Flask web server listening on all network interfaces
