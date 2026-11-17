@@ -72,26 +72,22 @@ def get_okta_api_token():  # Function to request a machine-to-machine OAuth acce
 LOGIN_HTML = """<!DOCTYPE html>
 <html>
 <head>
-    <title>Login</title>
-    <link rel="icon" href="https://idenhaus.com" type="image/x-icon">
+    <title>Okta Provisioning Portal - Login</title>
+    <link rel="icon" href="https://okta.com" type="image/x-icon">
     <style>
-        /* CSS styling for centering the login card, branding logo, and 3D push-button effect */
-        body { font-family: 'Montserrat', sans-serif; background: #f8f9fa; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; }
-        .card { background: white; padding: 40px; border-radius: 8px; box-shadow: 0 4px 15px rgba(0,0,0,0.05); text-align: center; width: 400px; }
-        .brand-logo { display: inline-flex; flex-direction: column; align-items: flex-start; font-weight: bold; line-height: 0.95; margin-bottom: 25px; }
-        .brand-top { color: #002855; font-size: 42px; letter-spacing: -1.5px; }
-        .brand-bottom { background: #002855; color: white; font-size: 30px; padding: 2px 8px; margin-top: 2px; letter-spacing: -0.5px; }
-        h2 { background: #002855; color: white; padding: 20px; margin: 0 -40px 20px -40px; font-size: 20px; }
-        .btn { background: #002855; color: white; padding: 12px 30px; border: none; border-radius: 6px; font-weight: bold; text-decoration: none; display: inline-block; border-bottom: 4px solid #00152e; transition: all 0.1s ease; box-shadow: 0 4px 6px rgba(0,0,0,0.15); }
-        .btn:hover { background: #001f42; margin-top: 2px; border-bottom-width: 2px; box-shadow: 0 2px 4px rgba(0,0,0,0.15); }
+        /* CSS styling for centering the login card and 3D push-button effect */
+        body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f4f6f9; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; }
+        .card { background: white; padding: 40px; border-radius: 8px; box-shadow: 0 4px 15px rgba(0,41,122,0.08); text-align: center; width: 400px; border-top: 4px solid #1662DD; }
+        h2 { background: #00297A; color: white; padding: 18px; margin: 0 -40px 20px -40px; font-size: 18px; letter-spacing: 0.8px; }
+        .btn { background: #1662DD; color: white; padding: 12px 30px; border: none; border-radius: 6px; font-weight: bold; text-decoration: none; display: inline-block; border-bottom: 4px solid #00297A; transition: all 0.1s ease; box-shadow: 0 4px 6px rgba(0,41,122,0.18); }
+        .btn:hover { background: #0d52c7; margin-top: 2px; border-bottom-width: 2px; box-shadow: 0 2px 4px rgba(0,41,122,0.18); }
         .btn:active { margin-top: 4px; border-bottom-width: 0px; box-shadow: none; }
     </style>
 </head>
 <body>
     <div class="card">
-        <div class="brand-logo"><div class="brand-top">iden</div><div class="brand-bottom">haus</div></div>
         <h2>OKTA PROVISIONING PORTAL</h2>
-        <p style="color:#555; font-size:14px; margin-bottom:30px;">Authentication required to manage users securely.</p>
+        <p style="color:#4a5568; font-size:14px; margin-bottom:30px;">Authentication required to manage users securely.</p>
         <!-- Clicking this link hits the Flask /login route to start the OIDC flow -->
         <a href="/login" class="btn">Log In with Okta</a>
     </div>
@@ -103,49 +99,45 @@ FORM_HTML = """<!DOCTYPE html>
 <html>
 <head>
     <title>Create An Okta User Profile</title>
-    <link rel="icon" href="https://idenhaus.com" type="image/x-icon">
+    <link rel="icon" href="https://okta.com" type="image/x-icon">
     <style>
         /* Layout, form rows, input error highlighting, disabled states, and status modal popup styles */
-        body { font-family: 'Montserrat', sans-serif; background: #f8f9fa; margin: 0; padding: 0; }
-        h2 { background: #002855; color: white; padding: 10px 20px; margin: 0; position: relative; display: flex; align-items: center; justify-content: center; min-height: 45px; }
-        .brand-header { position: absolute; left: 20px; display: flex; flex-direction: column; align-items: flex-start; font-weight: bold; line-height: 0.95; background: white; padding: 3px 6px; border-radius: 4px; }
-        .head-top { color: #002855; font-size: 18px; letter-spacing: -0.8px; }
-        .head-bottom { background: #002855; color: white; font-size: 13px; padding: 1px 3px; margin-top: 1px; letter-spacing: -0.3px; }
-        .title-text { font-size: 18px; font-weight: bold; letter-spacing: 0.5px; margin-left: 60px; }
+        body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f4f6f9; margin: 0; padding: 0; }
+        h2 { background: #00297A; color: white; padding: 10px 20px; margin: 0; position: relative; display: flex; align-items: center; justify-content: center; min-height: 45px; border-bottom: 3px solid #1662DD; }
+        .title-text { font-size: 18px; font-weight: bold; letter-spacing: 0.5px; }
         .logout-btn { position: absolute; right: 20px; background: #d32f2f; color: white; padding: 6px 12px; border-radius: 4px; text-decoration: none; font-size: 12px; font-weight: bold; }
         .logout-btn:hover { background: #b71c1c; }
-        .container { max-width: 650px; margin: 15px auto; background: white; padding: 18px 25px; border-radius: 8px; box-shadow: 0 4px 15px rgba(0,0,0,0.05); }
-        .section-title { font-size: 13px; color: #002855; font-weight: bold; margin: 8px 0 5px 0; text-transform: uppercase; letter-spacing: 0.8px; }
+        .container { max-width: 650px; margin: 15px auto; background: white; padding: 18px 25px; border-radius: 8px; box-shadow: 0 4px 15px rgba(0,41,122,0.06); }
+        .section-title { font-size: 13px; color: #00297A; font-weight: bold; margin: 8px 0 5px 0; text-transform: uppercase; letter-spacing: 0.8px; }
         hr { border: 0; border-top: 1px solid #e2e8f0; margin: 10px 0; }
         .form-row { display: flex; gap: 15px; margin-bottom: 8px; }
         .form-group { flex: 1; display: flex; flex-direction: column; }
         label { font-weight: bold; margin-bottom: 3px; font-size: 12px; color: #4a5568; }
         .ast { color: #d32f2f; font-weight: bold; }
         input[type="text"], input[type="date"], select { padding: 8px; border: 1px solid #cbd5e1; border-radius: 4px; box-sizing: border-box; font-size: 13px; transition: all 0.2s; }
-        input:focus, select:focus { border-color: #002855; outline: none; }
+        input:focus, select:focus { border-color: #1662DD; box-shadow: 0 0 0 2px rgba(22, 98, 221, 0.15); outline: none; }
         input.input-error, select.input-error { border: 2px solid #d32f2f !important; background-color: #fff5f5; }
         input:disabled { background-color: #e2e8f0; cursor: not-allowed; }
         .inline-radio-row { display: flex; align-items: center; gap: 18px; margin-top: 4px; }
         .inline-radio-row > label:first-child { margin-bottom: 0; }
         .radio-group { display: flex; gap: 16px; align-items: center; }
         .radio-label { display: flex; align-items: center; gap: 5px; font-weight: normal; font-size: 13px; color: #2d3748; cursor: pointer; margin-bottom: 0; }
-        .radio-label input[type="radio"] { accent-color: #002855; cursor: pointer; margin: 0; }
+        .radio-label input[type="radio"] { accent-color: #1662DD; cursor: pointer; margin: 0; }
         .btn-container { padding-top: 5px; }
-        .btn { width: 100%; background: #002855; color: white; padding: 10px; border: none; border-radius: 6px; font-size: 15px; font-weight: bold; cursor: pointer; border-bottom: 4px solid #00152e; transition: all 0.1s ease; box-shadow: 0 3px 5px rgba(0,0,0,0.15); display: block; text-align: center; box-sizing: border-box; }
-        .btn:hover { background: #001f42; transform: translateY(2px); border-bottom-width: 2px; box-shadow: 0 2px 3px rgba(0,0,0,0.15); }
+        .btn { width: 100%; background: #1662DD; color: white; padding: 10px; border: none; border-radius: 6px; font-size: 15px; font-weight: bold; cursor: pointer; border-bottom: 4px solid #00297A; transition: all 0.1s ease; box-shadow: 0 3px 5px rgba(0,41,122,0.18); display: block; text-align: center; box-sizing: border-box; }
+        .btn:hover { background: #0d52c7; transform: translateY(2px); border-bottom-width: 2px; box-shadow: 0 2px 3px rgba(0,41,122,0.18); }
         .btn:active { transform: translateY(4px); border-bottom-width: 0px; box-shadow: none; }
-        .modal-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); display: flex; justify-content: center; align-items: center; z-index: 1000; }
-        .modal-box { background: white; padding: 25px; border-radius: 8px; max-width: 500px; width: 90%; box-shadow: 0 4px 20px rgba(0,0,0,0.25); }
-        .modal-title { font-size: 18px; font-weight: bold; margin-bottom: 15px; color: #002855; text-align: left; }
+        .modal-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,22,66,0.55); display: flex; justify-content: center; align-items: center; z-index: 1000; }
+        .modal-box { background: white; padding: 25px; border-radius: 8px; max-width: 500px; width: 90%; box-shadow: 0 4px 20px rgba(0,0,0,0.25); border-top: 4px solid #1662DD; }
+        .modal-title { font-size: 18px; font-weight: bold; margin-bottom: 15px; color: #00297A; text-align: left; }
         .modal-body { margin-bottom: 20px; max-height: 200px; overflow-y: auto; background: #f8f9fa; padding: 12px; border-radius: 4px; border: 1px solid #e2e8f0; text-align: left; }
-        .modal-btn { background: #002855; color: white; padding: 10px 20px; border: none; border-radius: 4px; font-weight: bold; cursor: pointer; float: right; border-bottom: 3px solid #00152e; }
-        .modal-btn:hover { background: #001f42; }
+        .modal-btn { background: #1662DD; color: white; padding: 10px 20px; border: none; border-radius: 4px; font-weight: bold; cursor: pointer; float: right; border-bottom: 3px solid #00297A; }
+        .modal-btn:hover { background: #0d52c7; }
         .modal-btn:active { transform: translateY(2px); border-bottom-width: 0px; }
     </style>
 </head>
 <body>
     <h2>
-        <div class="brand-header"><div class="head-top">iden</div><div class="head-bottom">haus</div></div>
         <span class="title-text">Okta User Provisioning Dashboard</span> <a href="/logout" class="logout-btn">Log Out</a>
     </h2>
     <div class="container">
@@ -350,6 +342,8 @@ FORM_HTML = """<!DOCTYPE html>
     </script>
 </body>
 </html>"""
+
+
 @app.route('/')  # Root URL route
 def home():
     if 'access_token' in session:  # If the admin is already logged in
@@ -402,8 +396,6 @@ def dashboard():
     if 'access_token' not in session:  # Enforce authentication check
         return redirect(url_for('home'))  # Kick unauthenticated users back to login
     return render_template_string(FORM_HTML, f=None, msg=None, email_error=False)  # Render blank form
-
-
 @app.route('/create-user', methods=['POST'])  # Endpoint that processes form submissions
 def create_user():
     if 'access_token' not in session:  # Ensure the user has an active session before allowing API calls
@@ -488,8 +480,6 @@ def create_user():
         return render_template_string(FORM_HTML, f=form_data, msg=f"Okta API Error: {full_err}", email_error=False)  # Re-render form with error modal
     except Exception as e:  # Catch network timeouts, token errors, or unexpected exceptions
         return render_template_string(FORM_HTML, f=form_data, msg=f"Failed to communicate with Okta: {str(e)}", email_error=False)
-
-
 if __name__ == '__main__':  # Standard Python entry point check
     port = int(os.environ.get("PORT", 5001))  # Read PORT from environment (for Render/cloud hosting) or default to 5001
     app.run(host="0.0.0.0", port=port, debug=True)  # Start the Flask web server listening on all network interfaces
