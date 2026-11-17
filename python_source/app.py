@@ -33,6 +33,8 @@ with open(jwk_file, "r") as f:  # Open the private JSON Web Key (JWK) file in re
 
 SIGNING_KEY = jwt.algorithms.RSAAlgorithm.from_jwk(json.dumps(JWK_DICT))  # Convert the JWK dictionary into an RSA cryptographic signing key
 KEY_ID = JWK_DICT["kid"]  # Extract the Key ID ('kid') so Okta knows which public key matches our signature
+
+EMAIL_REGEX = r"^[^\s@]+@[^\s@]+\.[^\s@]+$"  # Strict email format pattern (no whitespace, requires @ and domain dot)
 # ============================================================
 
 
@@ -149,7 +151,7 @@ FORM_HTML = """<!DOCTYPE html>
             <div class="section-title">Contact & Communication</div>
             <div class="form-row">
                 <div class="form-group"><label>Primary Email:<span class="ast">*</span></label><input type="text" name="email" id="email" class="{% if email_error %}input-error{% endif %}" value="{{ f.email if f else '' }}"></div>
-                <div class="form-group"><label>Secondary Email (Optional):</label><input type="text" name="second_email" id="second_email" value="{{ f.second_email if f else '' }}"></div>
+                <div class="form-group"><label>Secondary Email (Optional):</label><input type="text" name="second_email" id="second_email" class="{% if second_email_error %}input-error{% endif %}" value="{{ f.second_email if f else '' }}"></div>
             </div>
             <hr>
             <div class="section-title">Employment & Role Details</div>
@@ -218,6 +220,13 @@ FORM_HTML = """<!DOCTYPE html>
     const startDateInput = document.getElementById('startDate');
     const durationInput = document.getElementById('contractDuration');
     const endDateInput = document.getElementById('endDate');
+    const primaryEmailInput = document.getElementById('email');
+    const secondaryEmailInput = document.getElementById('second_email');
+
+    // Helper function to validate email address format
+    function isValidEmail(emailStr) {
+        return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailStr);
+    }
 
     // Toggles visibility, required states, and resets values based on Employee vs Contractor selection
     function handleLayoutStateChange() {
@@ -306,6 +315,24 @@ FORM_HTML = """<!DOCTYPE html>
                 el.classList.remove('input-error');
             }
         });
+
+        // Validate Primary Email format
+        const primaryEmailVal = primaryEmailInput.value.trim();
+        if (!primaryEmailVal || !isValidEmail(primaryEmailVal)) {
+            primaryEmailInput.classList.add('input-error');
+            missing++;
+        } else {
+            primaryEmailInput.classList.remove('input-error');
+        }
+
+        // Validate Secondary Email format (only if a value is entered)
+        const secondaryEmailVal = secondaryEmailInput.value.trim();
+        if (secondaryEmailVal && !isValidEmail(secondaryEmailVal)) {
+            secondaryEmailInput.classList.add('input-error');
+            missing++;
+        } else {
+            secondaryEmailInput.classList.remove('input-error');
+        }
         
         // Validate 9-digit Employee Number if User Type is Employee
         if (userTypeSelect.value === 'Employee') {
@@ -393,7 +420,7 @@ def logout():
 def dashboard():
     if 'access_token' not in session:  # Enforce authentication check
         return redirect(url_for('home'))  # Kick unauthenticated users back to login
-    return render_template_string(FORM_HTML, f=None, msg=None, email_error=False)  # Render blank form
+    return render_template_string(FORM_HTML, f=None, msg=None, email_error=False, second_email_error=False)  # Render blank form
 @app.route('/create-user', methods=['POST'])  # Endpoint that processes form submissions
 def create_user():
     if 'access_token' not in session:  # Ensure the user has an active session before allowing API calls
@@ -413,21 +440,38 @@ def create_user():
     end_date = form_data.get('endDate', '').strip()  # Extract auto-calculated Contractor End Date
     activate_now = form_data.get('activateNow', 'no').strip().lower() == 'yes'  # Determine whether to activate user immediately
 
-    if not re.match(r"[^@]+@[^@]+\.[^@]+", email):  # Validate basic email syntax on the server
-        return render_template_string(FORM_HTML, f=form_data, msg="Invalid primary email format.", email_error=True)
+    # Validate Primary Email format on the server
+    if not re.match(EMAIL_REGEX, email):
+        return render_template_string(
+            FORM_HTML,
+            f=form_data,
+            msg="Data Validation Error: Invalid primary email format.",
+            email_error=True,
+            second_email_error=False
+        )
+
+    # Validate Secondary Email format on the server if provided
+    if second_email and not re.match(EMAIL_REGEX, second_email):
+        return render_template_string(
+            FORM_HTML,
+            f=form_data,
+            msg="Data Validation Error: Invalid secondary email format.",
+            email_error=False,
+            second_email_error=True
+        )
 
     if not start_date:  # Enforce Start Date for both Employees and Contractors
-        return render_template_string(FORM_HTML, f=form_data, msg="Data Validation Error: Start Date is required for all users.", email_error=False)
+        return render_template_string(FORM_HTML, f=form_data, msg="Data Validation Error: Start Date is required for all users.", email_error=False, second_email_error=False)
 
     # Server-side validation for Employee Number and Contractor fields
     if raw_user_type == 'Employee' and (not emp_num or not re.match(r"^\d{9}$", emp_num)):  # Enforce 9-digit number for Employees
-        return render_template_string(FORM_HTML, f=form_data, msg="Data Validation Error: Employee Number is required and must be a valid 9-digit number for Employees.", email_error=False)
+        return render_template_string(FORM_HTML, f=form_data, msg="Data Validation Error: Employee Number is required and must be a valid 9-digit number for Employees.", email_error=False, second_email_error=False)
 
     if raw_user_type == 'Contractor' and emp_num:  # Block Contractors from having an Employee Number
-        return render_template_string(FORM_HTML, f=form_data, msg="Data Validation Error: Contractors cannot have an Employee Number.", email_error=False)
+        return render_template_string(FORM_HTML, f=form_data, msg="Data Validation Error: Contractors cannot have an Employee Number.", email_error=False, second_email_error=False)
 
     if raw_user_type == 'Contractor' and (not duration_str or not re.match(r"^\d+$", duration_str)):  # Enforce Contractor numeric duration
-        return render_template_string(FORM_HTML, f=form_data, msg="Data Validation Error: Contractors require a valid numeric Contract Duration.", email_error=False)
+        return render_template_string(FORM_HTML, f=form_data, msg="Data Validation Error: Contractors require a valid numeric Contract Duration.", email_error=False, second_email_error=False)
 
     user_payload = {  # Construct the base JSON payload expected by Okta's /api/v1/users endpoint
         "profile": {
@@ -468,15 +512,15 @@ def create_user():
         )
         if okta_response.status_code in (200, 201):  # Check if Okta successfully created the user profile
             status_text = "activated" if activate_now else "created in staged mode"
-            return render_template_string(FORM_HTML, f=None, msg=f"User Profile {status_text} successfully in Okta!", email_error=False)
+            return render_template_string(FORM_HTML, f=None, msg=f"User Profile {status_text} successfully in Okta!", email_error=False, second_email_error=False)
         
         err_json = okta_response.json()  # Parse Okta's error response JSON if creation failed
         summary = err_json.get('errorSummary', 'Unknown error.')  # Get top-level error summary
         causes = ", ".join([c.get('errorSummary', '') for c in err_json.get('errorCauses', [])])  # Extract specific field-level causes
         full_err = f"{summary} ({causes})" if causes else summary  # Combine summary and detailed causes
-        return render_template_string(FORM_HTML, f=form_data, msg=f"Okta API Error: {full_err}", email_error=False)  # Re-render form with error modal
+        return render_template_string(FORM_HTML, f=form_data, msg=f"Okta API Error: {full_err}", email_error=False, second_email_error=False)  # Re-render form with error modal
     except Exception as e:  # Catch network timeouts, token errors, or unexpected exceptions
-        return render_template_string(FORM_HTML, f=form_data, msg=f"Failed to communicate with Okta: {str(e)}", email_error=False)
+        return render_template_string(FORM_HTML, f=form_data, msg=f"Failed to communicate with Okta: {str(e)}", email_error=False, second_email_error=False)
 if __name__ == '__main__':  # Standard Python entry point check
     port = int(os.environ.get("PORT", 5001))  # Read PORT from environment (for Render/cloud hosting) or default to 5001
     app.run(host="0.0.0.0", port=port, debug=True)  # Start the Flask web server listening on all network interfaces
