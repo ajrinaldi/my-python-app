@@ -449,7 +449,6 @@ def create_user():
         user_payload["profile"]["employeeNumber"] = emp_num
 
     if raw_user_type == 'Contractor':  # Attach custom lifecycle attributes for Contractors
-        user_payload["profile"]["contractStartDate"] = start_date
         user_payload["profile"]["contractDurationMonths"] = int(duration_str)  # Cast duration to an integer
         user_payload["profile"]["contractEndDate"] = end_date
 
