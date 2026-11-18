@@ -34,7 +34,7 @@ with open(jwk_file, "r") as f:  # Open the private JSON Web Key (JWK) file in re
 SIGNING_KEY = jwt.algorithms.RSAAlgorithm.from_jwk(json.dumps(JWK_DICT))  # Convert the JWK dictionary into an RSA cryptographic signing key
 KEY_ID = JWK_DICT["kid"]  # Extract the Key ID ('kid') so Okta knows which public key matches our signature
 
-EMAIL_REGEX = r"^[^\s@]+@[^\s@]+\.[^\s@]+$"  # Strict email format pattern (no whitespace, requires @ and domain dot)
+EMAIL_REGEX = r"^(?!.*\.\.)[a-zA-Z0-9](?:[a-zA-Z0-9._%+-]*[a-zA-Z0-9])?@(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]*[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$"
 # ============================================================
 
 
@@ -224,10 +224,10 @@ FORM_HTML = """<!DOCTYPE html>
     const secondaryEmailInput = document.getElementById('second_email');
 
     // Helper function to validate email address format
+        // Helper function to validate email address format
     function isValidEmail(emailStr) {
-        return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailStr);
+        return /^(?!.*\.\.)[a-zA-Z0-9](?:[a-zA-Z0-9._%+-]*[a-zA-Z0-9])?@(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]*[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$/.test(emailStr);
     }
-
     // Toggles visibility, required states, and resets values based on Employee vs Contractor selection
     function handleLayoutStateChange() {
         if (userTypeSelect.value === 'Contractor') {
